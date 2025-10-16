@@ -1099,6 +1099,28 @@ Block::Block(BlockContents&& contents, size_t read_amp_bytes_per_bit,
           break;
         }
         break;
+      case BlockBasedTableOptions::kDataBlockBinaryAndPerfectHash:
+        if (size < sizeof(uint32_t) /* block footer */ +
+                       sizeof(uint16_t) /* NUM_BUCK */) {
+          size = 0;
+          break;
+        }
+
+        uint16_t map_offset;
+        data_block_hash_index_.Initialize(
+            contents_.data.data(),
+            /* chop off NUM_RESTARTS */
+            static_cast<uint16_t>(size - sizeof(uint32_t)), &map_offset);
+
+        restart_offset_ = map_offset - num_restarts_ * sizeof(uint32_t);
+
+        if (restart_offset_ > map_offset) {
+          // map_offset is too small for NumRestarts() and
+          // therefore restart_offset_ wrapped around.
+          size = 0;
+          break;
+        }
+        break;
       default:
         size = 0;  // Error marker
     }

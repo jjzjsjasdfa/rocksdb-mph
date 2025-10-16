@@ -68,6 +68,8 @@ BlockBuilder::BlockBuilder(
       data_block_hash_index_builder_.Initialize(
           data_block_hash_table_util_ratio);
       break;
+    case BlockBasedTableOptions::kDataBlockBinaryAndPerfectHash:
+      data_block_perfect_hash_index_builder_.Initialize();
     default:
       assert(0);
   }
