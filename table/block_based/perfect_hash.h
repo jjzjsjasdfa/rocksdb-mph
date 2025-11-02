@@ -7,6 +7,9 @@
 #define XXH_INLINE_ALL
 #include "xxhash.h"
 #include <iostream>
+#include "util/coding.h"
+#include "rocksdb/slice.h"
+#include "util/hash.h"
 
 class PerfectHashTable {
  private:
@@ -68,7 +71,7 @@ class PerfectHashTable {
             temp_bm.assign(m, {});
 
             for (const auto& kv : remaining) {
-                uint64_t h = XXH64(kv.first.data(), kv.first.size(), seed);
+                uint64_t h = XXH64(kv.first, kv.first.size(), seed);
                 size_t idx = h % m;
                 temp_bm[idx].push_back(kv);
             }
@@ -139,82 +142,92 @@ class PerfectHashTable {
       std::string tmp;
 
       // 1. bitmap
-      PutFixed32(&tmp, static_cast<uint32_t>(bitmap.size()));
+      rocksdb::PutFixed32(&tmp, static_cast<uint32_t>(bitmap.size()));
       for (uint64_t word : bitmap)
         tmp.append(reinterpret_cast<const char*>(&word), sizeof(word));
 
       // 2. bitmap_offsets
-      PutFixed32(&tmp, static_cast<uint32_t>(bitmap_offsets.size()));
-      for (uint32_t offset : bitmap_offsets) PutFixed32(&tmp, offset);
+      rocksdb::PutFixed32(&tmp, static_cast<uint32_t>(bitmap_offsets.size()));
+      for (uint32_t offset : bitmap_offsets) rocksdb::PutFixed32(&tmp, offset);
 
       // 3. bitmap_seeds
-      PutFixed32(&tmp, static_cast<uint32_t>(bitmap_seeds.size()));
+      rocksdb::PutFixed32(&tmp, static_cast<uint32_t>(bitmap_seeds.size()));
       tmp.append(reinterpret_cast<const char*>(bitmap_seeds.data()),
                  bitmap_seeds.size());
 
       // 4. rank_vec
-      PutFixed32(&tmp, static_cast<uint32_t>(rank_vec.size()));
-      for (uint32_t r : rank_vec) PutFixed32(&tmp, r);
+      rocksdb::PutFixed32(&tmp, static_cast<uint32_t>(rank_vec.size()));
+      for (uint32_t r : rank_vec) rocksdb::PutFixed32(&tmp, r);
 
       // 5. values
-      PutFixed32(&tmp, static_cast<uint32_t>(values.size()));
+      rocksdb::PutFixed32(&tmp, static_cast<uint32_t>(values.size()));
       tmp.append(reinterpret_cast<const char*>(values.data()), values.size());
 
       // 6. n_bits
-      PutFixed64(&tmp, n_bits);
+      rocksdb::PutFixed64(&tmp, n_bits);
 
       buffer.append(tmp);
-      PutFixed64(&buffer, tmp.size());
+      rocksdb::PutFixed64(&buffer, tmp.size());
     }
 
     void Initialize(const char* data, size_t size) {
       const char* ptr = data;
+      const char* end = data + size;
 
       // 1. bitmap
-      uint32_t bitmap_size = DecodeFixed32(ptr);
+      assert(ptr + sizeof(uint32_t) <= end);
+      uint32_t bitmap_size = rocksdb::DecodeFixed32(ptr);
       ptr += sizeof(uint32_t);
       bitmap.resize(bitmap_size);
       for (uint32_t i = 0; i < bitmap_size; i++) {
-        bitmap[i] = DecodeFixed64(ptr);
+        bitmap[i] = rocksdb::DecodeFixed64(ptr);
         ptr += sizeof(uint64_t);
       }
 
       // 2. bitmap_offsets
-      uint32_t offsets_size = DecodeFixed32(ptr);
+      assert(ptr + sizeof(uint32_t) <= end);
+      uint32_t offsets_size = rocksdb::DecodeFixed32(ptr);
       ptr += sizeof(uint32_t);
       bitmap_offsets.resize(offsets_size);
       for (uint32_t i = 0; i < offsets_size; i++) {
-        bitmap_offsets[i] = DecodeFixed32(ptr);
+        assert(ptr + sizeof(uint32_t) <= end);
+        bitmap_offsets[i] = rocksdb::DecodeFixed32(ptr);
         ptr += sizeof(uint32_t);
       }
 
       // 3. bitmap_seeds
-      uint32_t seeds_size = DecodeFixed32(ptr);
+      assert(ptr + sizeof(uint32_t) <= end);
+      uint32_t seeds_size = rocksdb::DecodeFixed32(ptr);
       ptr += sizeof(uint32_t);
       bitmap_seeds.resize(seeds_size);
       std::memcpy(bitmap_seeds.data(), ptr, seeds_size);
       ptr += seeds_size;
 
       // 4. rank_vec
-      uint32_t rank_size = DecodeFixed32(ptr);
+      assert(ptr + sizeof(uint32_t) <= end);
+      uint32_t rank_size = rocksdb::DecodeFixed32(ptr);
       ptr += sizeof(uint32_t);
       rank_vec.resize(rank_size);
       for (uint32_t i = 0; i < rank_size; i++) {
-        rank_vec[i] = DecodeFixed32(ptr);
+        assert(ptr + sizeof(uint32_t) <= end);
+        rank_vec[i] = rocksdb::DecodeFixed32(ptr);
         ptr += sizeof(uint32_t);
       }
 
       // 5. values
-      uint32_t values_size = DecodeFixed32(ptr);
+      assert(ptr + sizeof(uint32_t) <= end);
+      uint32_t values_size = rocksdb::DecodeFixed32(ptr);
       ptr += sizeof(uint32_t);
       values.resize(values_size);
+      assert(ptr + values_size <= end);
       std::memcpy(values.data(), ptr, values_size);
       ptr += values_size;
 
       // 6. n_bits
-      n_bits = DecodeFixed64(ptr);
+      assert(ptr + sizeof(uint64_t) <= end);
+      n_bits = rocksdb::DecodeFixed64(ptr);
       ptr += sizeof(uint64_t);
 
-      assert(ptr - data <= static_cast<ptrdiff_t>(size));
+      assert(static_cast<size_t>(ptr - data) <= size);
     }
 };
